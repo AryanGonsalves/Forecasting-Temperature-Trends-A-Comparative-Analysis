@@ -1,0 +1,92 @@
+
+dt = Open("filtered_timeseries_file.csv"); 
+
+dt << New Column("Date", Numeric, Continuous);
+dt:Date = Parse Date(dt:dt, "dd/mm/yyyy");
+dt << Move Columns({"Date"}, To Beginning);
+dt << Time Series(Timeseries Role(:Date));
+
+numRows = N Rows(dt);
+splitPoint = Floor(0.8 * numRows);
+trainSet = dt << Subset(Selected Rows(1::splitPoint));
+testSet = dt << Subset(Selected Rows((splitPoint + 1)::numRows));
+
+arimaModel = Time Series Analysis(
+    Data Table(trainSet),
+    Y(:AverageTemperature),
+    ARIMA(2, 1, 2) 
+);
+
+// Forecast using ARIMA model
+arimaForecast = arimaModel << Forecast(
+    N Forecasts(N Rows(testSet)),
+    Save Fit to Table(1)
+);
+trainSet << Join(
+    With Table(testSet),
+    Matching Columns(:Date = :Date),
+    Preserved Rows(All Rows)
+);
+
+arimaActual = testSet:AverageTemperature;
+arimaPredicted = arimaForecast:Forecast;
+arimaMSE = Mean((arimaActual - arimaPredicted)^2);
+arimaRMSE = Sqrt(arimaMSE);
+arimaMAE = Mean(Abs(arimaActual - arimaPredicted));
+
+Show(arimaMSE, arimaRMSE, arimaMAE);
+
+// ---- SARIMAX Model ----
+sarimaxModel = Time Series Analysis(
+    Data Table(trainSet),
+    Y(:AverageTemperature),
+    ARIMA(1, 1, 1), 
+    Seasonal(1, 1, 1, 12) 
+);
+
+sarimaxForecast = sarimaxModel << Forecast(
+    N Forecasts(N Rows(testSet)),
+    Save Fit to Table(1)
+);
+
+sarimaxActual = testSet:AverageTemperature;
+sarimaxPredicted = sarimaxForecast:Forecast;
+sarimaxMSE = Mean((sarimaxActual - sarimaxPredicted)^2);
+sarimaxRMSE = Sqrt(sarimaxMSE);
+sarimaxMAE = Mean(Abs(sarimaxActual - sarimaxPredicted));
+
+Show(sarimaxMSE, sarimaxRMSE, sarimaxMAE);
+
+dt << Graph Builder(
+    Size(800, 600),
+    Show Control Panel(0),
+    Variables(:Date, :AverageTemperature),
+    Elements(
+        Line(
+            X(:Date),
+            Y(:AverageTemperature),
+            Legend("Actual")
+        ),
+        Line(
+            X(:Date),
+            Y(arimaForecast:Forecast),
+            Legend("Adjusted ARIMA")
+        ),
+        Line(
+            X(:Date),
+            Y(sarimaxForecast:Forecast),
+            Legend("SARIMAX")
+        )
+    )
+);
+
+resultsDT = New Table(
+    "ARIMA and SARIMAX Results",
+    Add Columns(
+        dt:Date << New Column("Actual", Numeric, Continuous),
+        dt:arimaForecast:Forecast << New Column("Adjusted ARIMA", Numeric, Continuous),
+        dt:sarimaxForecast:Forecast << New Column("SARIMAX", Numeric, Continuous)
+    )
+);
+
+resultsDT << Save("actual_vs_adjusted_arima_sarimax.csv");
